@@ -51,7 +51,7 @@ func init() {
 	zk.DefaultLogger = &silentLogger{}
 }
 
-func NewClient(zkHosts []string, zkRoot string) *Client {
+func NewClient(zkHosts []string, zkRoot string) (*Client, error) {
 	cl := &Client{
 		zkHosts:          zkHosts,
 		zkRoot:           zkRoot,
@@ -63,9 +63,19 @@ func NewClient(zkHosts []string, zkRoot string) *Client {
 		maxRetries:            max_action_retries,
 	}
 
-	cl.initZk()
+	err := cl.initZk()
+	if err != nil {
+		return nil, err
+	}
 
-	return cl
+	return cl, nil
+}
+
+func (c *Client) Close() {
+	if c.zkClient != nil {
+		c.zkClient.Close()
+		c.zkClient = nil
+	}
 }
 
 func (c *Client) SetLogLevel(level string) {
@@ -73,10 +83,10 @@ func (c *Client) SetLogLevel(level string) {
 	logging.SetLevel(lvl, "hbase-client")
 }
 
-func (c *Client) initZk() {
+func (c *Client) initZk() error {
 	zkclient, _, err := zk.Connect(c.zkHosts, time.Second*30)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	c.zkClient = zkclient
@@ -84,7 +94,8 @@ func (c *Client) initZk() {
 	res, _, _, err := c.zkClient.GetW(c.zkRoot + c.zkRootRegionPath)
 
 	if err != nil {
-		panic(err)
+		zkclient.Close()
+		return err
 	}
 
 	c.rootServer = c.decodeMeta(res)
@@ -93,10 +104,12 @@ func (c *Client) initZk() {
 	res, _, _, err = c.zkClient.GetW(c.zkRoot + "/master")
 
 	if err != nil {
-		panic(err)
+		zkclient.Close()
+		return err
 	}
 
 	c.masterServer = c.decodeMeta(res)
+	return nil
 }
 
 func (c *Client) decodeMeta(data []byte) *proto.ServerName {
